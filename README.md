@@ -10,13 +10,13 @@ Listens for Ctrl+C, Ctrl+X, and PrtScr keypresses, in addition to monitoring the
 
 Exit program with Alt+Shift+X
 
-Clipboard data is saved to c:/users/[username]/documents/MyClipboard
+Clipboard data is saved to whatever path is specified in options['clipboard_path'] near the top of the file.
 
 - Text content is grouped into daily files.
 - Images are saved individually.
 - Folder and content permissions are probably 0777.  This isn't explicitly set.
 - Filesystem settings are the first declarations in the file if you're interested in changing this.
-- Tested on Windows 7 with Python 2.7.
+- Tested on Windows 7, Windows XP with Python 2.7. 
 
 Dependencies:
 -------------
