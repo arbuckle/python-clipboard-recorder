@@ -18,7 +18,10 @@ from PIL import ImageGrab
 from threading import Thread
 
 options = {
-    'clipboard_path': 'c:/documents and settings/davida.wp/my documents/python/clipboard/',
+    # Change this to reflect the path to the folder where you'd like to store your clipboard
+    'clipboard_path': 'c:/documents and settings/[USERNAME]/my documents/python/clipboard/',
+    
+    # Files are saved with date string filenames, to prevent overwriting.  http://docs.python.org/2/library/datetime.html#strftime-and-strptime-behavior
     'file_fmt_img': "%Y-%m-%d-%H%M%S.png",
     'file_fmt_txt': "%Y-%m-%d.txt",
     'log_separator': "\n\n===========================\n====%Y-%m-%d %H:%M:%S====\n===========================\n"
@@ -26,55 +29,70 @@ options = {
 
 
 class Clipboard(object):
+    """
+    Clipboard provides a means of accessing the clipboard via its getClipboardData() function, which returns
+    the clipboard data and a datatype of either ("img", None) signifiying whether the clipboard data is an 
+    img or text.
+    
+    The previous clipboard values are accessible via 'self.clipboard' and 'self.datatype'
+    """
     def __init__(self, options):
-        self.clipboard_path = options.get('clipboard_path', None)
-        self.file_fmt_img = options.get('file_fmt_img', None)
-        self.file_fmt_txt = options.get('file_fmt_txt', None)
-        self.log_separator = options.get('log_separator', None)
-        
-        self.cb_previous = ''
-        self.cb_current = ''
-        self.cb_type = None
-        
-    def getClipboardData(self):
-        self.cb_previous = self.cb_current
+        self.clipboard = ''
+        self.datatype = None
 
+    def getClipboardData(self):
         cb.OpenClipboard()
         fmt = cb.EnumClipboardFormats()
         cb.CloseClipboard()
 
         if fmt in [1, 13, 16, 7, 49224, 49327, 49322, 49158, 49459, 49471]: #text, unicode-text, locale, oem text, ShellIDList Array, Preferred DropEffect, Shell Object Offsets, Filename, FileNameW, Ole Private Data
             cb.OpenClipboard()
-            self.cb_current, self.cb_type = cb.GetClipboardData(cb.CF_UNICODETEXT), None
+            self.clipboard, self.datatype = cb.GetClipboardData(cb.CF_UNICODETEXT), None
             cb.CloseClipboard()
         elif fmt in [2, 8, 17, 5, 49364]: #images
-            self.cb_current, self.cb_type = ImageGrab.grabclipboard(), 'img'
+            self.clipboard, self.datatype = ImageGrab.grabclipboard(), 'img'
+        return self.clipboard, self.datatype
 
-    def saveClipboardData(self):
-        if self.cb_type == 'img':
-            self.cb_current.save(self.getSavePath(), 'PNG')
+
+class FileSystem(object):
+    """
+    FileSystem provides a means of saving clipboard data to disk.
+    """
+    def __init__(self,options):
+        self.clipboard_path = options.get('clipboard_path', None)
+        self.file_fmt_img = options.get('file_fmt_img', None)
+        self.file_fmt_txt = options.get('file_fmt_txt', None)
+        self.log_separator = options.get('log_separator', None)
+
+    def saveClipboardData(self, clipboard, datatype):
+        if datatype == 'img':
+            clipboard.save(self._getSavePath(datatype), 'PNG')
         else:
-            cb_text = open(self.getSavePath(), 'a')
+            cb_text = open(self._getSavePath(datatype), 'a')
             cb_text.write(datetime.now().strftime(self.log_separator))
-            cb_text.write('%s\n' % self.cb_current)
+            cb_text.write('%s\n' % clipboard)
             cb_text.close()
 
-    def getSavePath(self):
-        if self.cb_type == 'img':
+    def _getSavePath(self, datatype):
+        if datatype == 'img':
             return self.clipboard_path + datetime.now().strftime(self.file_fmt_img)
         else:
             return self.clipboard_path + datetime.now().strftime(self.file_fmt_txt)
 
 
 class Handlers(object):
-    def __init__(self, clipboard):
+    """
+    Handlers for keyboard-initiated clipboard change events, as well as incidental (mouse-driven) clipboard
+    changes.
+    """
+    def __init__(self, clipboard, filesystem):
         self.clipboard = clipboard
+        self.save = filesystem.saveClipboardData
     
     def handleClipboardChanged(self, sleep=True):
         if sleep:
             time.sleep(0.2)
-        self.clipboard.getClipboardData()
-        self.clipboard.saveClipboardData()
+        self.save(*self.clipboard.getClipboardData())
 
     def handleKeypress(self, event):
         # Ctrl+C, Ctrl+X, PrtScr
@@ -88,23 +106,24 @@ class Handlers(object):
 
     def clipboardChangedListener(self):
         while 1:
-            last = self.clipboard.cb_current
-            self.clipboard.getClipboardData()
+            last = self.clipboard.clipboard
+            clipboard, datatype = self.clipboard.getClipboardData()
             
             # detecting when current type is image and determining if current/last are identical
             # PIL Image objects do not have an equals() method, so I compare the image strings instead.
             fresh_image = True
-            if self.clipboard.cb_type == 'img' and hasattr(last, 'getextrema') and hasattr(self.clipboard.cb_current, 'getextrema'):
-                fresh_image = not last.tostring() == self.clipboard.cb_current.tostring()
+            if datatype == 'img' and hasattr(last, 'getextrema') and hasattr(clipboard, 'getextrema'):
+                fresh_image = not last.tostring() == clipboard.tostring()
 
-            if last <> self.clipboard.cb_current and fresh_image:
+            if last <> clipboard and fresh_image:
                 self.handleClipboardChanged(False)
             time.sleep(2)
 
 
 def main():
+    filesystem = FileSystem(options)
     clipboard = Clipboard(options)
-    handlers = Handlers(clipboard)
+    handlers = Handlers(clipboard, filesystem)
     
     thread = Thread(target=handlers.clipboardChangedListener)
     thread.daemon = True
