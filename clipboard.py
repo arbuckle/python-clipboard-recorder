@@ -14,118 +14,104 @@ import time
 from datetime import datetime
 from pyHook import HookManager
 from pythoncom import PumpMessages
-from os import mkdir
-from os.path import expanduser, exists
 from PIL import ImageGrab
 from threading import Thread
 
-user_folder = expanduser('~')
-base_dir = 'documents'
-app_dir = 'MyClipboard'
+options = {
+    'clipboard_path': 'c:/documents and settings/davida.wp/my documents/python/clipboard/',
+    'file_fmt_img': "%Y-%m-%d-%H%M%S.png",
+    'file_fmt_txt': "%Y-%m-%d.txt",
+    'log_separator': "\n\n===========================\n====%Y-%m-%d %H:%M:%S====\n===========================\n"
+}
 
-file_fmt_img = "%Y-%m-%d-%H%M%S.png"
-file_fmt_txt = "%Y-%m-%d.txt"
-cb_separator = "\n\n===========================\n====%Y-%m-%d %H:%M:%S====\n===========================\n"
 
-
-# global object used to prevent conflict between keyboard and change handlers.  
-previous = ''
-
-#primary change handler for the application.
-def handleClipboardChanged(sleep=True):
-    data, cb_type = getClipboardData(sleep)
-    saveClipboardData(data, cb_type)
-
-#getClipboardData reads the clipboard and returns the data and the cb_type (img or None)
-def getClipboardData(sleep=True):
-    global previous
-    if sleep:
-        time.sleep(0.2) # Required to ensure the keylogger captures the existing clipboard data rather than the prior clipboard data. Race condition!
-
-    cb.OpenClipboard()
-    fmt = cb.EnumClipboardFormats()
-    cb.CloseClipboard()
-    #print fmt
-    data, cb_type = '', None
-    if fmt in [1, 13, 16, 7, 49224, 49327, 49322, 49158, 49459, 49471]: #text, unicode-text, locale, oem text, ShellIDList Array, Preferred DropEffect, Shell Object Offsets, Filename, FileNameW, Ole Private Data
-        cb.OpenClipboard()
-        data, cb_type = cb.GetClipboardData(cb.CF_UNICODETEXT), None
-        cb.CloseClipboard()
-    elif fmt in [2, 8, 17, 5, 49364]: #images
-        data, cb_type = ImageGrab.grabclipboard(), 'img'
-        #print data
-    
-    previous = data
-    return data, cb_type
-
-#saveClipboardData accepts clipboard data and an optional clipboard cb_type, either "img" or None
-def saveClipboardData(data, cb_type=None):
-    if cb_type == 'img':
-        #print 'saving'
-        data.save(getSavePath(cb_type), 'PNG')
-        #print 'img saved'
-    else:
-        cb_text = open(getSavePath(), 'a')
-        cb_text.write(datetime.now().strftime(cb_separator))
-        cb_text.write('%s\n' % data)
-        cb_text.close()
-
-#getSavePath returns the filename for saving clipboard data.  optional argument 'cb_type' is passed when clipboard content is an image.
-def getSavePath(cb_type=None):
-    if cb_type == 'img':
-        return getSaveFolder() + datetime.now().strftime(file_fmt_img)
-    else:
-        return getSaveFolder() + datetime.now().strftime(file_fmt_txt)
-
-#getSaveFolder returns the path of the folder in which to save files.    
-def getSaveFolder():
-    return "%s/%s/%s/" % (user_folder.replace('\\', '/'), base_dir, app_dir)
-
-#makeAppFolder creates the app_dir if it does not already exist.  Win7 only.
-def makeAppFolder():
-    if exists(user_folder) and exists('%s\\%s' % (user_folder, base_dir)):
-        if not exists('%s\\%s\\%s' % (user_folder, base_dir, app_dir)):
-            mkdir('%s\\%s\\%s' % (user_folder, base_dir, app_dir))
-
-#handleKeypress listens to all windows keypresses and when Ctrl+C or Ctrl+x is intercepted, spawns a new thread to capture the Clipboard data.
-def handleKeypress(event):
-    if event.Ascii == 3 or event.Ascii == 24 or event.Key == 'Snapshot':
-        thread = Thread(target=handleClipboardChanged)
-        thread.start()
-    elif event.Ascii == 88 and event.Alt == 32: # quit on alt+shift+x
-        sys.exit()
-    return True
-
-#clipboardChangedListener checks every two seconds to see whether the clipboard data has been modified.
-def clipboardChangedListener():
-    global previous
-    while 1:
-        last = previous
-        current, cb_type = getClipboardData(False)
+class Clipboard(object):
+    def __init__(self, options):
+        self.clipboard_path = options.get('clipboard_path', None)
+        self.file_fmt_img = options.get('file_fmt_img', None)
+        self.file_fmt_txt = options.get('file_fmt_txt', None)
+        self.log_separator = options.get('log_separator', None)
         
-        # detecting when current type is image and determining if current/last are identical
-        # PIL Image objects do not have an equals() method, so I compare the image strings instead.
-        fresh_image = True
-        if cb_type == 'img' and hasattr(last, 'getextrema') and hasattr(current, 'getextrema'):
-            fresh_image = not last.tostring() == current.tostring()
+        self.cb_previous = ''
+        self.cb_current = ''
+        self.cb_type = None
+        
+    def getClipboardData(self):
+        self.cb_previous = self.cb_current
 
-        if last <> current and fresh_image:
-            previous = current
-            handleClipboardChanged(False)
-        time.sleep(2)
+        cb.OpenClipboard()
+        fmt = cb.EnumClipboardFormats()
+        cb.CloseClipboard()
+
+        if fmt in [1, 13, 16, 7, 49224, 49327, 49322, 49158, 49459, 49471]: #text, unicode-text, locale, oem text, ShellIDList Array, Preferred DropEffect, Shell Object Offsets, Filename, FileNameW, Ole Private Data
+            cb.OpenClipboard()
+            self.cb_current, self.cb_type = cb.GetClipboardData(cb.CF_UNICODETEXT), None
+            cb.CloseClipboard()
+        elif fmt in [2, 8, 17, 5, 49364]: #images
+            self.cb_current, self.cb_type = ImageGrab.grabclipboard(), 'img'
+
+    def saveClipboardData(self):
+        if self.cb_type == 'img':
+            self.cb_current.save(self.getSavePath(), 'PNG')
+        else:
+            cb_text = open(self.getSavePath(), 'a')
+            cb_text.write(datetime.now().strftime(self.log_separator))
+            cb_text.write('%s\n' % self.cb_current)
+            cb_text.close()
+
+    def getSavePath(self):
+        if self.cb_type == 'img':
+            return self.clipboard_path + datetime.now().strftime(self.file_fmt_img)
+        else:
+            return self.clipboard_path + datetime.now().strftime(self.file_fmt_txt)
+
+
+class Handlers(object):
+    def __init__(self, clipboard):
+        self.clipboard = clipboard
+    
+    def handleClipboardChanged(self, sleep=True):
+        if sleep:
+            time.sleep(0.2)
+        self.clipboard.getClipboardData()
+        self.clipboard.saveClipboardData()
+
+    def handleKeypress(self, event):
+        # Ctrl+C, Ctrl+X, PrtScr
+        if event.Ascii == 3 or event.Ascii == 24 or event.Key == 'Snapshot':
+            thread = Thread(target=self.handleClipboardChanged)
+            thread.start()
+        # Exit on Alt+Shift+X
+        elif event.Ascii == 88 and event.Alt == 32: 
+            sys.exit()
+        return True
+
+    def clipboardChangedListener(self):
+        while 1:
+            last = self.clipboard.cb_current
+            self.clipboard.getClipboardData()
+            
+            # detecting when current type is image and determining if current/last are identical
+            # PIL Image objects do not have an equals() method, so I compare the image strings instead.
+            fresh_image = True
+            if self.clipboard.cb_type == 'img' and hasattr(last, 'getextrema') and hasattr(self.clipboard.cb_current, 'getextrema'):
+                fresh_image = not last.tostring() == self.clipboard.cb_current.tostring()
+
+            if last <> self.clipboard.cb_current and fresh_image:
+                self.handleClipboardChanged(False)
+            time.sleep(2)
 
 
 def main():
-    makeAppFolder()
-
-    # You could probably get rid of 90% of this program and just call clipboardChangedListener.
-    # This was added as an afterthought after I realized that mouse-initiated clipboard changes were ignored by keypress handlers.
-    thread = Thread(target=clipboardChangedListener)
+    clipboard = Clipboard(options)
+    handlers = Handlers(clipboard)
+    
+    thread = Thread(target=handlers.clipboardChangedListener)
     thread.daemon = True
     thread.start()
 
     hm = HookManager()
-    hm.KeyDown = handleKeypress
+    hm.KeyDown = handlers.handleKeypress
     hm.HookKeyboard()
     PumpMessages()
     
